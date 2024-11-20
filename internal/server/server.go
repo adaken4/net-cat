@@ -35,12 +35,15 @@ type Server struct {
 	address string
 	clients map[net.Conn]Client
 	mutex   sync.Mutex
+	maxConnections int
+	currentCount int
 }
 
 func NewServer(address string) *Server {
 	return &Server{
 		address: address,
 		clients: make(map[net.Conn]Client),
+		maxConnections: 3,
 	}
 }
 
@@ -59,6 +62,16 @@ func (s *Server) Start() error {
 			continue
 		}
 
+		s.mutex.Lock()
+        if s.currentCount >= s.maxConnections {
+            s.mutex.Unlock()
+            conn.Write([]byte("Chatroom is full. Try again later.\n"))
+            conn.Close()
+            continue
+        }
+        s.currentCount++
+        s.mutex.Unlock()
+
 		fmt.Println("New client connected")
 
 		go s.handleConnection(conn)
@@ -69,6 +82,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 	defer func() {
 		s.mutex.Lock()
 		delete(s.clients, conn)
+		s.currentCount--
 		s.mutex.Unlock()
 		conn.Close()
 	}()
@@ -109,6 +123,13 @@ func (s *Server) handleConnection(conn net.Conn) {
 		currentTime := time.Now()
 		formattedTime := currentTime.Format(layout)
 		message := string(buf[:n])
+		message = strings.TrimSpace(message)
+		// Prevent blank messages from being sent to the chat
+		if message == "" {
+			fmt.Printf("[%s]: (empty message ignored)\n", name)
+			continue
+		}
+		message = message + "\n"
 		fmt.Printf("[%s]: %s", name, message)
 		s.broadcastMessage(fmt.Sprintf("[%s][%s]:%s", formattedTime, name, message), conn)
 	}
