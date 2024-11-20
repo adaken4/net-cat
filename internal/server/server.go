@@ -1,7 +1,9 @@
 package server
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -32,17 +34,17 @@ type Client struct {
 }
 
 type Server struct {
-	address string
-	clients map[net.Conn]Client
-	mutex   sync.Mutex
+	address        string
+	clients        map[net.Conn]Client
+	mutex          sync.Mutex
 	maxConnections int
-	currentCount int
+	currentCount   int
 }
 
 func NewServer(address string) *Server {
 	return &Server{
-		address: address,
-		clients: make(map[net.Conn]Client),
+		address:        address,
+		clients:        make(map[net.Conn]Client),
 		maxConnections: 3,
 	}
 }
@@ -63,14 +65,14 @@ func (s *Server) Start() error {
 		}
 
 		s.mutex.Lock()
-        if s.currentCount >= s.maxConnections {
-            s.mutex.Unlock()
-            conn.Write([]byte("Chatroom is full. Try again later.\n"))
-            conn.Close()
-            continue
-        }
-        s.currentCount++
-        s.mutex.Unlock()
+		if s.currentCount >= s.maxConnections {
+			s.mutex.Unlock()
+			conn.Write([]byte("Chatroom is full. Try again later.\n"))
+			conn.Close()
+			continue
+		}
+		s.currentCount++
+		s.mutex.Unlock()
 
 		fmt.Println("New client connected")
 
@@ -111,12 +113,18 @@ func (s *Server) handleConnection(conn net.Conn) {
 	s.mutex.Unlock()
 
 	conn.Write([]byte(fmt.Sprintf("Welcome, %s!\n", name)))
+	s.broadcastMessage(fmt.Sprintf("%s has joined our chat...\n", name), conn)
 	fmt.Printf("%s joined the chat.\n", name)
 
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
-			fmt.Println("Connection closed:", err)
+			if errors.Is(err, io.EOF) {
+				fmt.Printf("Connection closed by: [%s]\n", name)
+				s.broadcastMessage(fmt.Sprintf("%s has left our chat...\n", name), conn)
+				return
+			}
+			fmt.Println("Error reading from connection:", err)
 			return
 		}
 		layout := "2006-01-02 15:04:05"
